@@ -1,0 +1,16 @@
+.{
+    .name = .dvui_sokol,
+    .version = "0.0.0",
+    .fingerprint = 0x80ad5953e613c0f8,
+    .dependencies = .{
+        .sokol = .{
+            .url = "git+https://github.com/floooh/sokol-zig.git#24369f2a92fd46a6984ff3dd0835d7fbd383c86c",
+            .hash = "sokol-0.1.0-pb1HK5-MLQCTl0tpNad0aA9Poz6bb7MxdjR3JJI3U-lF",
+        },
+        .dvui = .{
+            .url = "git+https://github.com/david-vanderson/dvui#9d63918d98ae3fbb53c6082d020d89c76c5fbc22",
+            .hash = "dvui-0.2.0-AQFJmSaAzQCpI3LEwuiLjhv2Du9GQF_69kuhr2hoKBi7",
+        },
+    },
+    .paths = .{""},
+}

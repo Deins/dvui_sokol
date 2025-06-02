@@ -110,6 +110,23 @@ fn buildWasm(b: *Build, mod: *Build.Module, dep_sokol: *Dependency, dep_cimgui: 
     // Emscripten SDK setup step)
     if (dep_cimgui) |cimgui| cimgui.artifact("cimgui_clib").step.dependOn(&dep_sokol.artifact("sokol_clib").step);
 
+    const extra_args: []const []const u8 = if (mod.optimize == .Debug) &.{
+        "-sSTACK_SIZE=2097152", // larger 2MB stack
+        "-sASSERTIONS",
+        "-gsource-map",
+        "-O0",
+        // "-sTOTAL_MEMORY=1024MB",
+        "-sUSE_OFFSET_CONVERTER",
+        "-sALLOW_MEMORY_GROWTH",
+        "-msimd128",
+        "-fsanitize=undefined",
+    } else &.{
+        "-sSTACK_SIZE=2097152", // larger 2MB stack
+        "-sUSE_OFFSET_CONVERTER",
+        "-sALLOW_MEMORY_GROWTH",
+        "-msimd128",
+    };
+
     // create a build step which invokes the Emscripten linker
     const link_step = try sokol.emLinkStep(b, .{
         .lib_main = demo,
@@ -122,18 +139,9 @@ fn buildWasm(b: *Build, mod: *Build.Module, dep_sokol: *Dependency, dep_cimgui: 
         .use_emmalloc = true,
         .use_filesystem = false,
         .shell_file_path = dep_sokol.path("src/sokol/web/shell.html"),
+        // .shell_file_path = b.path("src/shell_simple.html"),
         .release_use_lto = true,
-        //.shell_file_path = b.path("src/shell_simple.html"),
-        .extra_args = &.{
-            "-sSTACK_SIZE=2097152", // larger 2MB stack
-            // "-sASSERTIONS",
-            // "-gsource-map",
-            // "-O0",
-            // "-sTOTAL_MEMORY=1024MB",
-            "-sUSE_OFFSET_CONVERTER",
-            "-sALLOW_MEMORY_GROWTH",
-            "-msimd128",
-        },
+        .extra_args = extra_args,
     });
     // ...and a special run step to start the web build output via 'emrun'
     const run = sokol.emRunStep(b, .{ .name = "demo", .emsdk = dep_emsdk });

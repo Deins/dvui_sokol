@@ -40,6 +40,12 @@ default_texture: sg.Image, // white 1x1 texture used as default when no texture 
 //      Backend
 // ============================================================================
 
+pub const wasm = struct {
+    pub fn wasm_add_noto_font() void {
+        slog.err("wasm_add_noto_font is not implemented in dvui_sokol.zig", .{});
+    }
+};
+
 pub fn nanoTime(_: *SokolBackend) i128 {
     return std.time.nanoTimestamp();
 }

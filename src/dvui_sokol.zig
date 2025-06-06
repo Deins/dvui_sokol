@@ -16,6 +16,11 @@ pub const kind: dvui.enums.Backend = .custom;
 pub const SokolBackend = @This();
 pub const Context = *SokolBackend;
 
+/// Batch all draws into large buffers and defer rendering  at the end of frame.
+/// More efficient than current fallback of creating buffers for each draw.
+/// Additionally allows better mixing of user side sokol rendering mixed with dvui calls
+const batch = true;
+
 // ============================================================================
 //      Global State
 // ============================================================================
@@ -25,6 +30,15 @@ var ctx: SokolBackend = undefined;
 // ============================================================================
 //      Context
 // ============================================================================
+const DrawCall = struct {
+    scisor: dvui.Rect.Physical,
+    texture: sg.Image, // NOTE: upper bit of id is used for interpolation, needs to be cleared before passing to sokol
+    idx_offset: u32,
+    vtx_offset: u32,
+    idx_size: u16,
+    vtx_size: u16,
+};
+
 gpa: std.mem.Allocator,
 arena: std.mem.Allocator = undefined,
 win: dvui.Window,
@@ -35,6 +49,12 @@ pass_action: sg.PassAction = .{},
 sampler_nearest: sg.Sampler,
 sampler_linear: sg.Sampler,
 default_texture: sg.Image, // white 1x1 texture used as default when no texture is given
+// we batch things into buffers and only render them at the end of frame
+draw_calls: std.ArrayListUnmanaged(DrawCall) = .{},
+idx_data: std.ArrayListUnmanaged(u16) = .{},
+vtx_data: std.ArrayListUnmanaged(dvui.Vertex) = .{},
+idx_buf: sg.Buffer = .{},
+vtx_buf: sg.Buffer = .{},
 
 // ============================================================================
 //      Backend
@@ -55,14 +75,72 @@ pub fn backend(self: *SokolBackend) dvui.Backend {
 pub fn begin(self: *SokolBackend, arena: std.mem.Allocator) void {
     self.arena = arena;
 
-    sg.beginPass(.{ .action = ctx.pass_action, .swapchain = sokol.glue.swapchain() });
-    sg.applyPipeline(ctx.pip);
-    const ubo = shader.Ubo{ .framebuffer_size = .{ sapp.widthf(), sapp.heightf() } };
-    sg.applyUniforms(shader.UB_UBO, sg.asRange(&ubo));
+    if (!batch) {
+        sg.beginPass(.{ .action = ctx.pass_action, .swapchain = sokol.glue.swapchain() });
+        sg.applyPipeline(ctx.pip);
+        const ubo = shader.Ubo{ .framebuffer_size = .{ sapp.widthf(), sapp.heightf() } };
+        sg.applyUniforms(shader.UB_UBO, sg.asRange(&ubo));
+    }
 }
 
-pub fn end(_: *SokolBackend) void {
+pub fn end(self: *SokolBackend) void {
+    if (batch) {
+        sg.beginPass(.{ .action = ctx.pass_action, .swapchain = sokol.glue.swapchain() });
+        sg.applyPipeline(ctx.pip);
+        const ubo = shader.Ubo{ .framebuffer_size = .{ sapp.widthf(), sapp.heightf() } };
+        sg.applyUniforms(shader.UB_UBO, sg.asRange(&ubo));
+
+        // resize buffers if needed
+        if (sg.queryBufferSize(ctx.idx_buf) < (ctx.idx_data.items.len * @sizeOf(u16))) {
+            sg.destroyBuffer(ctx.idx_buf);
+            ctx.idx_buf = sg.makeBuffer(.{
+                .usage = .{ .index_buffer = true, .stream_update = true },
+                .size = std.mem.alignForward(u32, @intCast(ctx.idx_data.items.len * @sizeOf(u16)), 1024 * 64),
+                .label = "dvui",
+            });
+        }
+        if (sg.queryBufferSize(ctx.vtx_buf) < (ctx.vtx_data.items.len * @sizeOf(dvui.Vertex))) {
+            sg.destroyBuffer(ctx.vtx_buf);
+            ctx.vtx_buf = sg.makeBuffer(.{
+                .usage = .{ .vertex_buffer = true, .stream_update = true },
+                .size = std.mem.alignForward(u32, @intCast(ctx.vtx_data.items.len * @sizeOf(dvui.Vertex)), 1024 * 64),
+                .label = "dvui",
+            });
+        }
+
+        sg.updateBuffer(self.idx_buf, sg.asRange(self.idx_data.items));
+        sg.updateBuffer(self.vtx_buf, sg.asRange(self.vtx_data.items));
+
+        var prev_scisor = dvui.Rect.Physical{ .x = 0, .y = 0, .w = 0, .h = 0 };
+        var bind = sg.Bindings{
+            .vertex_buffers = [_]sg.Buffer{self.vtx_buf} ++ ([_]sg.Buffer{.{}} ** 7),
+            .index_buffer = self.idx_buf,
+            .images = [_]sg.Image{self.default_texture} ++ ([_]sg.Image{.{}} ** 15),
+            .samplers = [_]sg.Sampler{ctx.sampler_linear} ++ ([_]sg.Sampler{.{}} ** 15),
+        };
+        for (self.draw_calls.items) |draw| {
+            if (!prev_scisor.equals(draw.scisor)) {
+                sg.applyScissorRectf(draw.scisor.x, draw.scisor.y, draw.scisor.w, draw.scisor.h, true);
+                prev_scisor = draw.scisor;
+            }
+            bind.samplers[0] = if (draw.texture.id & (1 << 31) == 0) ctx.sampler_nearest else ctx.sampler_linear;
+            bind.images[0] = sg.Image{ .id = draw.texture.id & ~@as(u32, (1 << 31)) };
+            bind.index_buffer_offset = @intCast(draw.idx_offset * @sizeOf(u16));
+            bind.vertex_buffer_offsets[0] = @intCast(draw.vtx_offset * @sizeOf(dvui.Vertex));
+            sg.applyBindings(bind);
+            sg.draw(
+                0,
+                @intCast(draw.idx_size),
+                1,
+            );
+        }
+    }
+
     sg.endPass();
+
+    ctx.idx_data.clearRetainingCapacity();
+    ctx.vtx_data.clearRetainingCapacity();
+    ctx.draw_calls.clearRetainingCapacity();
 }
 
 /// Return size of the window in physical pixels.  For a 300x200 retina
@@ -84,7 +162,22 @@ pub fn contentScale(_: *SokolBackend) f32 {
 }
 
 pub fn drawClippedTriangles(self: *SokolBackend, texture: ?dvui.Texture, vtx: []const dvui.Vertex, idx: []const u16, clipr: ?dvui.Rect.Physical) void {
-    _ = self; // autofix
+    if (batch) {
+        const idx_offset = self.idx_data.items.len;
+        const vtx_offset = self.vtx_data.items.len;
+        self.idx_data.appendSlice(self.gpa, idx) catch return;
+        self.vtx_data.appendSlice(self.gpa, vtx) catch return;
+        self.draw_calls.append(self.gpa, .{
+            .scisor = clipr orelse .{ .x = 0, .y = 0, .w = sapp.widthf(), .h = sapp.heightf() },
+            .texture = if (texture) |t| sg.Image{ .id = @intCast(@intFromPtr(t.ptr)) } else self.default_texture,
+            .idx_offset = @intCast(idx_offset),
+            .vtx_offset = @intCast(vtx_offset),
+            .idx_size = @intCast(idx.len),
+            .vtx_size = @intCast(vtx.len),
+        }) catch return;
+        return;
+    }
+
     if (clipr) |c| {
         sg.applyScissorRectf(c.x, c.y, c.w, c.h, true);
     } else {
@@ -204,7 +297,7 @@ pub fn refresh(_: *SokolBackend) void {}
 pub fn openURL(self: *SokolBackend, url: []const u8) !void {
     _ = self; // autofix
     _ = url; // autofix
-    return error.OutOfMemory;
+    return;
 }
 
 // ============================================================================
@@ -263,6 +356,19 @@ pub export fn init() void {
     img_desc.data.subimage[0][0] = .{ .ptr = &[4]u8{ 0xff, 0xff, 0xff, 0xff }, .size = 4 };
     ctx.default_texture = sg.makeImage(img_desc);
 
+    if (batch) {
+        ctx.vtx_buf = sg.makeBuffer(.{
+            .usage = .{ .vertex_buffer = true, .stream_update = true },
+            .size = 1024 * 512,
+            .label = "dvui",
+        });
+        ctx.idx_buf = sg.makeBuffer(.{
+            .usage = .{ .index_buffer = true, .stream_update = true },
+            .size = 1024 * 1024,
+            .label = "dvui",
+        });
+    }
+
     ctx.win = dvui.Window.init(@src(), ctx.gpa, backend(&ctx), .{}) catch |err| std.debug.panic("Dvui failed to initialize: {}", .{err});
 
     if (dvui.App.get()) |app| if (app.initFn) |initFn| initFn(&ctx.win) catch |err| std.debug.panic("App init failed: {}", .{err});
@@ -270,6 +376,15 @@ pub export fn init() void {
 
 pub export fn cleanup() void {
     if (dvui.App.get()) |app| if (app.deinitFn) |deinitFn| deinitFn();
+
+    if (batch) {
+        sg.destroyBuffer(ctx.vtx_buf);
+        sg.destroyBuffer(ctx.idx_buf);
+
+        ctx.idx_data.deinit(ctx.gpa);
+        ctx.vtx_data.deinit(ctx.gpa);
+        ctx.draw_calls.deinit(ctx.gpa);
+    }
 
     sg.destroyPipeline(ctx.pip);
     ctx.win.deinit();

@@ -10,11 +10,13 @@ const WebGFX = enum {
     WEBGL2,
     WGPU,
 };
-const web_gfx = WebGFX.WGPU;
+var web_gfx = WebGFX.WGPU;
 
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    web_gfx = b.option(WebGFX, "web_gfx", "graphics backend to use for web builds") orelse .WGPU;
 
     // note that the sokol dependency is built with `.with_sokol_imgui = true`
     const dep_sokol = b.dependency("sokol", .{

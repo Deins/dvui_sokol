@@ -18,7 +18,7 @@ pub const Context = *SokolBackend;
 
 /// Batch all draws into large buffers and defer rendering  at the end of frame.
 /// More efficient than current fallback of creating buffers for each draw.
-/// Additionally allows better mixing of user side sokol rendering mixed with dvui calls
+/// Additionally allows easier inter-mixing of user side sokol rendering calls/state with dvui calls
 const batch = true;
 
 // ============================================================================
@@ -31,7 +31,7 @@ var ctx: SokolBackend = undefined;
 //      Context
 // ============================================================================
 const DrawCall = struct {
-    scisor: dvui.Rect.Physical,
+    scissor: dvui.Rect.Physical,
     texture: sg.Image, // NOTE: upper bit of id is used for interpolation, needs to be cleared before passing to sokol
     idx_offset: u32,
     vtx_offset: u32,
@@ -49,7 +49,7 @@ pass_action: sg.PassAction = .{},
 sampler_nearest: sg.Sampler,
 sampler_linear: sg.Sampler,
 default_texture: sg.Image, // white 1x1 texture used as default when no texture is given
-// we batch things into buffers and only render them at the end of frame
+// batch things into buffers and only render them at the end of frame
 draw_calls: std.ArrayListUnmanaged(DrawCall) = .{},
 idx_data: std.ArrayListUnmanaged(u16) = .{},
 vtx_data: std.ArrayListUnmanaged(dvui.Vertex) = .{},
@@ -111,7 +111,7 @@ pub fn end(self: *SokolBackend) void {
         sg.updateBuffer(self.idx_buf, sg.asRange(self.idx_data.items));
         sg.updateBuffer(self.vtx_buf, sg.asRange(self.vtx_data.items));
 
-        var prev_scisor = dvui.Rect.Physical{ .x = 0, .y = 0, .w = 0, .h = 0 };
+        var prev_scissor = dvui.Rect.Physical{ .x = 0, .y = 0, .w = 0, .h = 0 };
         var bind = sg.Bindings{
             .vertex_buffers = [_]sg.Buffer{self.vtx_buf} ++ ([_]sg.Buffer{.{}} ** 7),
             .index_buffer = self.idx_buf,
@@ -119,28 +119,24 @@ pub fn end(self: *SokolBackend) void {
             .samplers = [_]sg.Sampler{ctx.sampler_linear} ++ ([_]sg.Sampler{.{}} ** 15),
         };
         for (self.draw_calls.items) |draw| {
-            if (!prev_scisor.equals(draw.scisor)) {
-                sg.applyScissorRectf(draw.scisor.x, draw.scisor.y, draw.scisor.w, draw.scisor.h, true);
-                prev_scisor = draw.scisor;
+            if (!prev_scissor.equals(draw.scissor)) {
+                sg.applyScissorRectf(draw.scissor.x, draw.scissor.y, draw.scissor.w, draw.scissor.h, true);
+                prev_scissor = draw.scissor;
             }
             bind.samplers[0] = if (draw.texture.id & (1 << 31) == 0) ctx.sampler_nearest else ctx.sampler_linear;
             bind.images[0] = sg.Image{ .id = draw.texture.id & ~@as(u32, (1 << 31)) };
             bind.index_buffer_offset = @intCast(draw.idx_offset * @sizeOf(u16));
             bind.vertex_buffer_offsets[0] = @intCast(draw.vtx_offset * @sizeOf(dvui.Vertex));
             sg.applyBindings(bind);
-            sg.draw(
-                0,
-                @intCast(draw.idx_size),
-                1,
-            );
+            sg.draw(0, @intCast(draw.idx_size), 1);
         }
+
+        ctx.idx_data.clearRetainingCapacity();
+        ctx.vtx_data.clearRetainingCapacity();
+        ctx.draw_calls.clearRetainingCapacity();
     }
 
     sg.endPass();
-
-    ctx.idx_data.clearRetainingCapacity();
-    ctx.vtx_data.clearRetainingCapacity();
-    ctx.draw_calls.clearRetainingCapacity();
 }
 
 /// Return size of the window in physical pixels.  For a 300x200 retina
@@ -168,7 +164,7 @@ pub fn drawClippedTriangles(self: *SokolBackend, texture: ?dvui.Texture, vtx: []
         self.idx_data.appendSlice(self.gpa, idx) catch return;
         self.vtx_data.appendSlice(self.gpa, vtx) catch return;
         self.draw_calls.append(self.gpa, .{
-            .scisor = clipr orelse .{ .x = 0, .y = 0, .w = sapp.widthf(), .h = sapp.heightf() },
+            .scissor = clipr orelse .{ .x = 0, .y = 0, .w = sapp.widthf(), .h = sapp.heightf() },
             .texture = if (texture) |t| sg.Image{ .id = @intCast(@intFromPtr(t.ptr)) } else self.default_texture,
             .idx_offset = @intCast(idx_offset),
             .vtx_offset = @intCast(vtx_offset),

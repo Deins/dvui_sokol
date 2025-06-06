@@ -9,14 +9,12 @@ const window_icon_png = @embedFile("zig-favicon.png");
 // * expose the backend's main function
 // * use the backend's log function
 pub const dvui_app: dvui.App = .{
-    .config = .{
-        .options = .{
-            .size = .{ .w = 800.0, .h = 600.0 },
-            .min_size = .{ .w = 250.0, .h = 350.0 },
-            .title = "DVUI App Example",
-            .icon = window_icon_png,
-        },
-    },
+    .config = .{ .options = .{
+        .size = .{ .w = 800.0, .h = 600.0 },
+        .min_size = .{ .w = 250.0, .h = 350.0 },
+        .title = "DVUI App Example",
+        .icon = window_icon_png,
+    } },
     .frameFn = AppFrame,
     .initFn = AppInit,
     .deinitFn = AppDeinit,
@@ -31,8 +29,10 @@ var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = gpa_instance.allocator();
 
 // Runs before the first frame, after backend and dvui.Window.init()
-pub fn AppInit(win: *dvui.Window) void {
+// - runs between win.begin()/win.end()
+pub fn AppInit(win: *dvui.Window) !void {
     _ = win;
+    //try dvui.addFont("NOTO", @embedFile("../src/fonts/NotoSansKR-Regular.ttf"), null);
 }
 
 // Run as app is shutting down before dvui.Window.deinit()
@@ -99,4 +99,55 @@ pub fn frame() !dvui.App.Result {
     try dvui.Examples.demo();
 
     return .ok;
+}
+
+test "tab order" {
+    var t = try dvui.testing.init(.{});
+    defer t.deinit();
+
+    try dvui.testing.settle(frame);
+
+    try dvui.testing.expectNotFocused("show-demo-btn");
+
+    try dvui.testing.pressKey(.tab, .none);
+    try dvui.testing.settle(frame);
+
+    try dvui.testing.expectFocused("show-demo-btn");
+}
+
+test "open example window" {
+    var t = try dvui.testing.init(.{});
+    defer t.deinit();
+
+    try dvui.testing.settle(frame);
+
+    // FIXME: The global show_demo_window variable makes tests order dependent
+    dvui.Examples.show_demo_window = false;
+
+    try std.testing.expect(dvui.tagGet(dvui.Examples.demo_window_tag) == null);
+
+    try dvui.testing.moveTo("show-demo-btn");
+    try dvui.testing.click(.left);
+    try dvui.testing.settle(frame);
+
+    try dvui.testing.expectVisible(dvui.Examples.demo_window_tag);
+}
+
+test "snapshot" {
+    // snapshot tests are unstable
+    var t = try dvui.testing.init(.{});
+    defer t.deinit();
+
+    // FIXME: The global show_demo_window variable makes tests order dependent
+    dvui.Examples.show_demo_window = false;
+
+    try dvui.testing.settle(frame);
+
+    // Try swapping the names of ./snapshots/app.zig-test.snapshot-X.png
+    try t.snapshot(@src(), frame);
+
+    try dvui.testing.pressKey(.tab, .none);
+    try dvui.testing.settle(frame);
+
+    try t.snapshot(@src(), frame);
 }

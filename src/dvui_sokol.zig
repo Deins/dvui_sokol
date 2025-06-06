@@ -265,7 +265,7 @@ pub export fn init() void {
 
     ctx.win = dvui.Window.init(@src(), ctx.gpa, backend(&ctx), .{}) catch |err| std.debug.panic("Dvui failed to initialize: {}", .{err});
 
-    if (dvui.App.get()) |app| if (app.initFn) |initFn| initFn(&ctx.win);
+    if (dvui.App.get()) |app| if (app.initFn) |initFn| initFn(&ctx.win) catch |err| std.debug.panic("App init failed: {}", .{err});
 }
 
 pub export fn cleanup() void {

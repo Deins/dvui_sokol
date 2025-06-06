@@ -386,137 +386,152 @@ pub fn main() !void {
 //      Web Backend specific
 // ============================================================================
 
-pub const wasm = struct {
-    pub fn wasm_add_noto_font() void {
-        slog.err("wasm_add_noto_font is not implemented in dvui_sokol.zig", .{});
+pub usingnamespace if (!is_wasm) struct {} else struct {
+    // extern c allocator plumbed by emscripten, std.heap.c_allocator should work, but this is easier
+    extern fn malloc(size: usize) ?*anyopaque;
+    extern fn realloc(ptr: ?*anyopaque, size: usize) ?*anyopaque;
+    extern fn free(ptr: ?*anyopaque) void;
+
+    pub const wasm = struct {
+        pub fn wasm_add_noto_font() void {
+            slog.err("wasm_add_noto_font is not implemented in dvui_sokol.zig", .{});
+        }
+    };
+
+    pub fn downloadData(name: []const u8, data: []const u8) !void {
+        _ = name; // autofix
+        _ = data; // autofix
     }
-};
 
-pub fn downloadData(name: []const u8, data: []const u8) !void {
-    _ = name; // autofix
-    _ = data; // autofix
-}
-
-pub fn setCursor(self: *SokolBackend, cursor: dvui.enums.Cursor) void {
-    _ = self; // autofix
-    _ = cursor; // autofix
-}
-
-pub fn openFilePicker(id: dvui.WidgetId, accept: ?[]const u8, multiple: bool) void {
-    _ = id; // autofix
-    _ = accept; // autofix
-    _ = multiple; // autofix
-}
-
-pub fn getFileName(id: dvui.WidgetId, file_index: usize) ?[:0]const u8 {
-    _ = id; // autofix
-    _ = file_index; // autofix
-    return "";
-}
-
-pub fn getFileSize(id: dvui.WidgetId, file_index: usize) ?usize {
-    _ = id; // autofix
-    _ = file_index; // autofix
-    return 0;
-}
-
-pub fn readFileData(id: dvui.WidgetId, file_index: usize, data: [*]u8) void {
-    _ = id; // autofix
-    _ = file_index; // autofix
-    _ = data; // autofix
-}
-
-pub fn getNumberOfFilesAvailable(id: dvui.WidgetId) usize {
-    _ = id; // autofix
-    return 0;
-}
-
-pub export fn dvui_c_alloc(size: usize) ?*anyopaque {
-    return @ptrCast(std.heap.c_allocator.alloc(u8, size) catch null);
-}
-export fn dvui_c_realloc_sized(_ptr: ?*anyopaque, oldsize: usize, newsize: usize) ?*anyopaque {
-    if (_ptr == null) {
-        return dvui_c_alloc(newsize);
+    pub fn setCursor(self: *SokolBackend, cursor: dvui.enums.Cursor) void {
+        _ = self; // autofix
+        _ = cursor; // autofix
     }
-    const ptr: [*]u8 = @ptrCast(_ptr);
-    if (newsize == 0) {
-        dvui_c_free(ptr);
+
+    pub fn openFilePicker(id: dvui.WidgetId, accept: ?[]const u8, multiple: bool) void {
+        _ = id; // autofix
+        _ = accept; // autofix
+        _ = multiple; // autofix
+    }
+
+    pub fn getFileName(id: dvui.WidgetId, file_index: usize) ?[:0]const u8 {
+        _ = id; // autofix
+        _ = file_index; // autofix
+        return "";
+    }
+
+    pub fn getFileSize(id: dvui.WidgetId, file_index: usize) ?usize {
+        _ = id; // autofix
+        _ = file_index; // autofix
+        return 0;
+    }
+
+    pub fn readFileData(id: dvui.WidgetId, file_index: usize, data: [*]u8) void {
+        _ = id; // autofix
+        _ = file_index; // autofix
+        _ = data; // autofix
+    }
+
+    pub fn getNumberOfFilesAvailable(id: dvui.WidgetId) usize {
+        _ = id; // autofix
+        return 0;
+    }
+
+    pub export fn dvui_c_alloc(size: usize) ?*anyopaque {
+        // return @ptrCast(std.heap.c_allocator.alloc(u8, size) catch null);
+        return malloc(size);
+    }
+    export fn dvui_c_realloc_sized(_ptr: ?*anyopaque, oldsize: usize, newsize: usize) ?*anyopaque {
+        _ = oldsize; // autofix
+        return realloc(_ptr, newsize);
+        // if (_ptr == null) {
+        //     return dvui_c_alloc(newsize);
+        // }
+        // const ptr: [*]u8 = @ptrCast(_ptr);
+        // if (newsize == 0) {
+        //     dvui_c_free(ptr);
+        //     return null;
+        // }
+        // // TODO: figure out if realloc can be plumbed directly, for now allocate and copy
+        // const new_mem: [*]u8 = @ptrCast(dvui_c_alloc(newsize) orelse return null);
+        // @memcpy(new_mem[0..oldsize], ptr[0..oldsize]);
+        // dvui_c_free(ptr);
+        // return new_mem;
+    }
+
+    pub export fn dvui_c_free(ptr: ?*anyopaque) void {
+        free(ptr);
+    }
+
+    export fn dvui_c_panic(msg: [*c]const u8) noreturn {
+        slog.err("PANIC: {s}", .{msg});
+        unreachable;
+    }
+
+    export fn dvui_c_sqrt(x: f64) f64 {
+        return @sqrt(x);
+    }
+
+    export fn dvui_c_pow(x: f64, y: f64) f64 {
+        return @exp(@log(x) * y);
+    }
+
+    export fn dvui_c_ldexp(x: f64, n: c_int) f64 {
+        return x * @exp2(@as(f64, @floatFromInt(n)));
+    }
+
+    export fn dvui_c_floor(x: f64) f64 {
+        return @floor(x);
+    }
+
+    export fn dvui_c_ceil(x: f64) f64 {
+        return @ceil(x);
+    }
+
+    export fn dvui_c_fmod(x: f64, y: f64) f64 {
+        return @mod(x, y);
+    }
+
+    export fn dvui_c_cos(x: f64) f64 {
+        return @cos(x);
+    }
+
+    export fn dvui_c_acos(x: f64) f64 {
+        return std.math.acos(x);
+    }
+
+    export fn dvui_c_fabs(x: f64) f64 {
+        return @abs(x);
+    }
+
+    export fn dvui_c_strlen(x: [*c]const u8) usize {
+        return std.mem.len(x);
+    }
+
+    export fn dvui_c_memcpy(dest: [*c]u8, src: [*c]const u8, n: usize) [*c]u8 {
+        @memcpy(dest[0..n], src[0..n]);
+        return dest;
+    }
+
+    export fn dvui_c_memmove(dest: [*c]u8, src: [*c]const u8, n: usize) [*c]u8 {
+        //log.debug("dvui_c_memmove dest {*} src {*} {d}", .{ dest, src, n });
+        const buf = dvui.currentWindow().arena().alloc(u8, n) catch unreachable;
+        @memcpy(buf, src[0..n]);
+        @memcpy(dest[0..n], buf);
+        return dest;
+    }
+
+    export fn dvui_c_memset(dest: [*c]u8, x: u8, n: usize) [*c]u8 {
+        @memset(dest[0..n], x);
+        return dest;
+    }
+
+    /// zig allocators etc. use @returnAddress() a lot
+    /// but emscripten its is crazy expensive, so we override it with a no-op
+    export fn emscripten_return_address(_: i32) callconv(.C) ?*anyopaque {
         return null;
     }
-    // TODO: figure out if realloc can be plumbed directly, for now allocate and copy
-    const new_mem: [*]u8 = @ptrCast(dvui_c_alloc(newsize) orelse return null);
-    @memcpy(new_mem[0..oldsize], ptr[0..oldsize]);
-    dvui_c_free(ptr);
-    return new_mem;
-}
-
-pub export fn dvui_c_free(ptr: ?*anyopaque) void {
-    _ = ptr; // autofix
-}
-
-export fn dvui_c_panic(msg: [*c]const u8) noreturn {
-    slog.err("PANIC: {s}", .{msg});
-    unreachable;
-}
-
-export fn dvui_c_sqrt(x: f64) f64 {
-    return @sqrt(x);
-}
-
-export fn dvui_c_pow(x: f64, y: f64) f64 {
-    return @exp(@log(x) * y);
-}
-
-export fn dvui_c_ldexp(x: f64, n: c_int) f64 {
-    return x * @exp2(@as(f64, @floatFromInt(n)));
-}
-
-export fn dvui_c_floor(x: f64) f64 {
-    return @floor(x);
-}
-
-export fn dvui_c_ceil(x: f64) f64 {
-    return @ceil(x);
-}
-
-export fn dvui_c_fmod(x: f64, y: f64) f64 {
-    return @mod(x, y);
-}
-
-export fn dvui_c_cos(x: f64) f64 {
-    return @cos(x);
-}
-
-export fn dvui_c_acos(x: f64) f64 {
-    return std.math.acos(x);
-}
-
-export fn dvui_c_fabs(x: f64) f64 {
-    return @abs(x);
-}
-
-export fn dvui_c_strlen(x: [*c]const u8) usize {
-    return std.mem.len(x);
-}
-
-export fn dvui_c_memcpy(dest: [*c]u8, src: [*c]const u8, n: usize) [*c]u8 {
-    @memcpy(dest[0..n], src[0..n]);
-    return dest;
-}
-
-export fn dvui_c_memmove(dest: [*c]u8, src: [*c]const u8, n: usize) [*c]u8 {
-    //log.debug("dvui_c_memmove dest {*} src {*} {d}", .{ dest, src, n });
-    const buf = dvui.currentWindow().arena().alloc(u8, n) catch unreachable;
-    @memcpy(buf, src[0..n]);
-    @memcpy(dest[0..n], buf);
-    return dest;
-}
-
-export fn dvui_c_memset(dest: [*c]u8, x: u8, n: usize) [*c]u8 {
-    @memset(dest[0..n], x);
-    return dest;
-}
-
+};
 // ============================================================================
 //      Event utils
 // ============================================================================

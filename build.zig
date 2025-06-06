@@ -116,13 +116,11 @@ fn buildWasm(b: *Build, mod: *Build.Module, dep_sokol: *Dependency, dep_cimgui: 
         "-gsource-map",
         "-O0",
         // "-sTOTAL_MEMORY=1024MB",
-        "-sUSE_OFFSET_CONVERTER",
         "-sALLOW_MEMORY_GROWTH",
         "-msimd128",
-        "-fsanitize=undefined",
+        // "-fsanitize=undefined",
     } else &.{
         "-sSTACK_SIZE=2097152", // larger 2MB stack
-        "-sUSE_OFFSET_CONVERTER",
         "-sALLOW_MEMORY_GROWTH",
         "-msimd128",
     };
@@ -142,6 +140,7 @@ fn buildWasm(b: *Build, mod: *Build.Module, dep_sokol: *Dependency, dep_cimgui: 
         // .shell_file_path = b.path("src/shell_simple.html"),
         .release_use_lto = true,
         .extra_args = extra_args,
+        // .use_offset_converter = true,
     });
     // ...and a special run step to start the web build output via 'emrun'
     const run = sokol.emRunStep(b, .{ .name = "demo", .emsdk = dep_emsdk });

@@ -11,7 +11,8 @@ This can be great for quick starting 3D or 2D projects where custom rendering is
 * Render textures
 * Touch events
 * Optimize buffer handling (currently each drawTriangles allocates and frees, slow on web where createBuffer can take 0.5ms)
-* Example mixing sokol & dvui rendering
+* Example of mixing sokol & dvui rendering
+* Investigate how to do non-continuous rendering and sleep when no activity happens
 
 ## Building and Running
 

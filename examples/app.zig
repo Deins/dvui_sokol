@@ -81,7 +81,6 @@ pub fn frame() !dvui.App.Result {
     }
     tl2.deinit();
 
-    dvui.Examples.show_demo_window = true;
     const label = if (dvui.Examples.show_demo_window) "Hide Demo Window" else "Show Demo Window";
     if (try dvui.button(@src(), label, .{}, .{ .tag = "show-demo-btn" })) {
         dvui.Examples.show_demo_window = !dvui.Examples.show_demo_window;

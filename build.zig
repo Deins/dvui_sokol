@@ -58,7 +58,7 @@ pub fn build(b: *Build) !void {
 
     // main module with sokol and cimgui imports
     const mod_main = b.createModule(.{
-        .root_source_file = b.path("src/app.zig"),
+        .root_source_file = b.path("examples/app.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{

@@ -19,7 +19,8 @@ pub const Context = *SokolBackend;
 /// Batch all draws into large buffers and defer rendering  at the end of frame.
 /// More efficient than current fallback of creating buffers for each draw.
 /// Additionally allows easier inter-mixing of user side sokol rendering calls/state with dvui calls
-const batch = true;
+const batch = false;
+const defer_texture_destruction = batch; // due to batch rendering at end of frame, texture use after free can occur - defer texture destruction to end of frame
 
 // ============================================================================
 //      Global State
@@ -55,6 +56,13 @@ idx_data: std.ArrayListUnmanaged(u16) = .{},
 vtx_data: std.ArrayListUnmanaged(dvui.Vertex) = .{},
 idx_buf: sg.Buffer = .{},
 vtx_buf: sg.Buffer = .{},
+
+texture_destruction_chain: if (defer_texture_destruction) ?*TextureChain else void = if (defer_texture_destruction) null else undefined,
+
+const TextureChain = struct {
+    texture: sg.Image = .{ .id = 0 },
+    next: ?*TextureChain = null,
+};
 
 // ============================================================================
 //      Backend
@@ -136,6 +144,13 @@ pub fn end(self: *SokolBackend) void {
         ctx.draw_calls.clearRetainingCapacity();
     }
 
+    // destroy textures
+    if (defer_texture_destruction) {
+        while (ctx.texture_destruction_chain) |tc| {
+            sg.destroyImage(tc.texture);
+            ctx.texture_destruction_chain = tc.next;
+        }
+    }
     sg.endPass();
 }
 
@@ -234,9 +249,19 @@ pub fn textureCreate(self: *SokolBackend, pixels: [*]u8, width: u32, height: u32
 }
 
 pub fn textureDestroy(self: *SokolBackend, texture: dvui.Texture) void {
-    _ = self; // autofix
     const img: sg.Image = .{ .id = @intCast(@intFromPtr(texture.ptr) & (~@as(u32, (1 << 31)))) };
-    sg.destroyImage(img);
+    if (!defer_texture_destruction) {
+        sg.destroyImage(img);
+    } else {
+        const tc = self.arena.create(TextureChain) catch |err| {
+            slog.err("defered texture destruction err: {}", .{err});
+            // risky but sokol on most platforms handles this gracefully in release builds
+            sg.destroyImage(img);
+            return;
+        };
+        tc.* = .{ .texture = img, .next = ctx.texture_destruction_chain };
+        self.texture_destruction_chain = tc;
+    }
 }
 
 pub fn textureCreateTarget(self: *SokolBackend, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) !dvui.TextureTarget {

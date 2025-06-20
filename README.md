@@ -12,7 +12,6 @@ This can be great for quick starting 3D or 2D projects where custom rendering is
 * Render textures
 * Touch events
 * Example of mixing sokol & dvui rendering
-* Fix: defered/batched rendering crashes in debug build due to premature texture destruction 
 
 ### ❌ Not supported ❌
 * vsync off - vsync is always on

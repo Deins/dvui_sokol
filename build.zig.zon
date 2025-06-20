@@ -8,8 +8,8 @@
             .hash = "sokol-0.1.0-pb1HK5-MLQCTl0tpNad0aA9Poz6bb7MxdjR3JJI3U-lF",
         },
         .dvui = .{
-            .url = "git+https://github.com/david-vanderson/dvui#c5d5b1e42b16736476611c6095e9fa16fd1b3307",
-            .hash = "dvui-0.2.0-AQFJme6-zQBu8jVuJa9u9_BAMJmbOH6otjUr-4FdVRbj",
+            .url = "git+https://github.com/david-vanderson/dvui#3da5114817ad6d0d950269d3f307bfcb5348a22f",
+            .hash = "dvui-0.2.0-AQFJmXKwzgDPDa0YjyYw86k9DRUviF7bI0TEnvjR0xcE",
         },
     },
     .paths = .{""},

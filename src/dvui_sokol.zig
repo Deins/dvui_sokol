@@ -77,7 +77,7 @@ pub fn sleep(_: *SokolBackend, ns: u64) void {
 }
 
 pub fn backend(self: *SokolBackend) dvui.Backend {
-    return dvui.Backend.init(self, @This());
+    return dvui.Backend.init(self);
 }
 
 pub fn begin(self: *SokolBackend, arena: std.mem.Allocator) void {

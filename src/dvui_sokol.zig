@@ -21,6 +21,9 @@ pub const Context = *SokolBackend;
 /// Additionally allows easier inter-mixing of user side sokol rendering calls/state with dvui calls
 const batch = false;
 const defer_texture_destruction = batch; // due to batch rendering at end of frame, texture use after free can occur - defer texture destruction to end of frame
+const render_textures = false;
+const render_texture_format = sg.PixelFormat.RGBA8;
+const render_texture_sample_count = 1;
 
 // ============================================================================
 //      Global State
@@ -40,7 +43,8 @@ const DrawCall = struct {
     vtx_size: u16,
 };
 
-gpa: std.mem.Allocator,
+// todo: pass this alloc to sokol as well
+gpa: std.mem.Allocator, // allocator used for init and long term (more than one frame) allocations
 arena: std.mem.Allocator = undefined,
 win: dvui.Window,
 
@@ -50,6 +54,7 @@ pass_action: sg.PassAction = .{},
 sampler_nearest: sg.Sampler,
 sampler_linear: sg.Sampler,
 default_texture: sg.Image, // white 1x1 texture used as default when no texture is given
+texture_targets: std.ArrayListUnmanaged(sg.Image) = .{},
 // batch things into buffers and only render them at the end of frame
 draw_calls: std.ArrayListUnmanaged(DrawCall) = .{},
 idx_data: std.ArrayListUnmanaged(u16) = .{},
@@ -57,11 +62,11 @@ vtx_data: std.ArrayListUnmanaged(dvui.Vertex) = .{},
 idx_buf: sg.Buffer = .{},
 vtx_buf: sg.Buffer = .{},
 
-texture_destruction_chain: if (defer_texture_destruction) ?*TextureChain else void = if (defer_texture_destruction) null else undefined,
+texture_destruction_chain: if (defer_texture_destruction) ?*ImageChain else void = if (defer_texture_destruction) null else undefined,
 
-const TextureChain = struct {
+const ImageChain = struct {
     texture: sg.Image = .{ .id = 0 },
-    next: ?*TextureChain = null,
+    next: ?*ImageChain = null,
 };
 
 // ============================================================================
@@ -227,7 +232,7 @@ pub fn drawClippedTriangles(self: *SokolBackend, texture: ?dvui.Texture, vtx: []
 }
 
 /// Create a `dvui.Texture` from the given `pixels` in RGBA.
-pub fn textureCreate(self: *SokolBackend, pixels: [*]u8, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) dvui.Texture {
+pub fn textureCreate(self: *SokolBackend, pixels: [*]const u8, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) dvui.Texture {
     _ = self; // autofix
     var img_desc = sg.ImageDesc{
         .width = @intCast(width),
@@ -253,7 +258,7 @@ pub fn textureDestroy(self: *SokolBackend, texture: dvui.Texture) void {
     if (!defer_texture_destruction) {
         sg.destroyImage(img);
     } else {
-        const tc = self.arena.create(TextureChain) catch |err| {
+        const tc = self.arena.create(ImageChain) catch |err| {
             slog.err("defered texture destruction err: {}", .{err});
             // risky but sokol on most platforms handles this gracefully in release builds
             sg.destroyImage(img);
@@ -265,11 +270,42 @@ pub fn textureDestroy(self: *SokolBackend, texture: dvui.Texture) void {
 }
 
 pub fn textureCreateTarget(self: *SokolBackend, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) !dvui.TextureTarget {
-    _ = self; // autofix
-    _ = width; // autofix
-    _ = height; // autofix
-    _ = interpolation; // autofix
-    return error.TextureCreate;
+    if (!render_textures) return error.TextureCreate;
+
+    var target_idx: u32 = 0;
+    for (self.texture_targets.items, 0..) |target, i| {
+        if (target.id != 0) continue;
+        target_idx = @intCast(i);
+        break;
+    }
+    if (target_idx == 0) {
+        (self.texture_targets.addOne(self.gpa) catch return error.TextureCreate).* = .{};
+        target_idx = @intCast(self.texture_targets.items.len - 1);
+    }
+
+    std.debug.assert(width > 0 and height > 0);
+    const img_desc = sg.ImageDesc{
+        .usage = .{ .render_attachment = true },
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .pixel_format = render_texture_format,
+        .sample_count = render_texture_sample_count,
+        .label = "dvui-target",
+    };
+    const image = sg.makeImage(img_desc);
+
+    var id = image.id;
+    std.debug.assert((id & (1 << 31)) == 0); // interpolation bit
+    switch (interpolation) {
+        .nearest => {},
+        .linear => id |= 1 << 31,
+    }
+    self.texture_targets.items[target_idx].id = id;
+    return .{
+        .width = width,
+        .height = height,
+        .ptr = @ptrFromInt(target_idx + 1), // +1 to avoid null pointer
+    };
 }
 
 /// Read pixel data (RGBA) from `texture` into `pixels_out`.
@@ -277,6 +313,7 @@ pub fn textureReadTarget(self: *SokolBackend, texture: dvui.TextureTarget, pixel
     _ = self; // autofix
     _ = texture; // autofix
     _ = pixels_out; // autofix
+    return error.TextureRead; // sokol does not support reading from texture targets
 }
 
 /// Convert texture target made with `textureCreateTarget` into return texture
@@ -284,8 +321,7 @@ pub fn textureReadTarget(self: *SokolBackend, texture: dvui.TextureTarget, pixel
 /// used by dvui.
 pub fn textureFromTarget(self: *SokolBackend, texture: dvui.TextureTarget) dvui.Texture {
     _ = self; // autofix
-    _ = texture; // autofix
-    return .{ .ptr = @ptrFromInt(0xBAD), .width = 0, .height = 0 };
+    return .{ .ptr = texture.ptr, .width = texture.width, .height = texture.height };
 }
 
 /// Render future `drawClippedTriangles` to the passed `texture` (or screen
@@ -319,6 +355,11 @@ pub fn openURL(self: *SokolBackend, url: []const u8) !void {
     _ = self; // autofix
     _ = url; // autofix
     return;
+}
+
+pub fn preferredColorScheme(self: SokolBackend) ?dvui.enums.ColorScheme {
+    _ = self; // autofix
+    return null;
 }
 
 // ============================================================================

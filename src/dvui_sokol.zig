@@ -19,7 +19,7 @@ pub const Context = *SokolBackend;
 /// Batch all draws into large buffers and defer rendering  at the end of frame.
 /// More efficient than current fallback of creating buffers for each draw.
 /// Additionally allows easier inter-mixing of user side sokol rendering calls/state with dvui calls
-const batch = false;
+const batch = true;
 const defer_texture_destruction = batch; // due to batch rendering at end of frame, texture use after free can occur - defer texture destruction to end of frame
 const render_textures = false;
 const render_texture_format = sg.PixelFormat.RGBA8;
@@ -62,7 +62,7 @@ vtx_data: std.ArrayListUnmanaged(dvui.Vertex) = .{},
 idx_buf: sg.Buffer = .{},
 vtx_buf: sg.Buffer = .{},
 
-texture_destruction_chain: if (defer_texture_destruction) ?*ImageChain else void = if (defer_texture_destruction) null else undefined,
+textures_to_destroy_later: std.ArrayListUnmanaged(sg.Image) = .{},
 
 const ImageChain = struct {
     texture: sg.Image = .{ .id = 0 },
@@ -151,10 +151,8 @@ pub fn end(self: *SokolBackend) void {
 
     // destroy textures
     if (defer_texture_destruction) {
-        while (ctx.texture_destruction_chain) |tc| {
-            sg.destroyImage(tc.texture);
-            ctx.texture_destruction_chain = tc.next;
-        }
+        for (ctx.textures_to_destroy_later.items) |tc| sg.destroyImage(tc);
+        ctx.textures_to_destroy_later.clearRetainingCapacity();
     }
     sg.endPass();
 }
@@ -258,14 +256,12 @@ pub fn textureDestroy(self: *SokolBackend, texture: dvui.Texture) void {
     if (!defer_texture_destruction) {
         sg.destroyImage(img);
     } else {
-        const tc = self.arena.create(ImageChain) catch |err| {
+        self.textures_to_destroy_later.append(self.gpa, img) catch |err| {
             slog.err("defered texture destruction err: {}", .{err});
             // risky but sokol on most platforms handles this gracefully in release builds
             sg.destroyImage(img);
             return;
         };
-        tc.* = .{ .texture = img, .next = ctx.texture_destruction_chain };
-        self.texture_destruction_chain = tc;
     }
 }
 
@@ -451,6 +447,7 @@ pub export fn cleanup() void {
     sg.destroyPipeline(ctx.pip);
     ctx.win.deinit();
     // simgui.shutdown();
+    if (defer_texture_destruction) ctx.textures_to_destroy_later.deinit(ctx.gpa); // shoudld we bother destroying remaining textures?
     sg.shutdown();
 }
 
